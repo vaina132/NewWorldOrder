@@ -1,0 +1,14 @@
+{
+  "frames": {
+    "terrain_grass": { "frame": { "x": 0, "y": 0, "w": 64, "h": 32 } },
+    "terrain_desert": { "frame": { "x": 64, "y": 0, "w": 64, "h": 32 } },
+    "terrain_water": { "frame": { "x": 128, "y": 0, "w": 64, "h": 32 } },
+    "terrain_road": { "frame": { "x": 192, "y": 0, "w": 64, "h": 32 } }
+  },
+  "meta": {
+    "image": "game-atlas.png",
+    "format": "RGBA8888",
+    "size": { "w": 256, "h": 32 },
+    "scale": 1
+  }
+}
