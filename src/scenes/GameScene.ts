@@ -11,7 +11,12 @@ import { ResourceSystem } from '@/systems/ResourceSystem';
 import { PowerSystem } from '@/systems/PowerSystem';
 import { BuildSystem } from '@/systems/BuildSystem';
 import { ProductionSystem } from '@/systems/ProductionSystem';
+import { CombatSystem } from '@/systems/CombatSystem';
+import { VeterancySystem } from '@/systems/VeterancySystem';
+import { FogSystem } from '@/systems/FogSystem';
 import { NavGrid } from '@/pathfinding/NavGrid';
+import { ProjectileRenderer } from '@/rendering/ProjectileRenderer';
+import { FogRenderer } from '@/rendering/FogRenderer';
 import { PerformanceOverlay } from '@/ui/PerformanceOverlay';
 import { TileHighlight } from '@/ui/TileHighlight';
 import { Sidebar } from '@/ui/Sidebar';
@@ -44,6 +49,11 @@ export class GameScene extends Phaser.Scene {
   private powerSystem!: PowerSystem;
   private buildSystem!: BuildSystem;
   private productionSystem!: ProductionSystem;
+  private combatSystem!: CombatSystem;
+  private veterancySystem!: VeterancySystem;
+  private fogSystem!: FogSystem;
+  private projectileRenderer!: ProjectileRenderer;
+  private fogRenderer!: FogRenderer;
   private perfOverlay!: PerformanceOverlay;
   private tileHighlight!: TileHighlight;
   private sidebar!: Sidebar;
@@ -100,6 +110,21 @@ export class GameScene extends Phaser.Scene {
 
     // Command system
     this.commandSystem = new CommandSystem(this, this.entityManager, this.selectionSystem, this.navGrid, player1);
+
+    // Combat system
+    this.combatSystem = new CombatSystem(this.entityManager, this.playerStates);
+    this.combatSystem.setNavGrid(this.navGrid);
+
+    // Projectile renderer
+    this.projectileRenderer = new ProjectileRenderer(this);
+    this.combatSystem.setProjectileSpawner((fx, fy, tx, ty, c) => this.projectileRenderer.spawn(fx, fy, tx, ty, c));
+
+    // Veterancy system
+    this.veterancySystem = new VeterancySystem(this.entityManager);
+
+    // Fog of war
+    this.fogSystem = new FogSystem(player1, this.entityManager);
+    this.fogRenderer = new FogRenderer(this, this.fogSystem);
 
     // Spawn starting bases
     this.spawnStartingBase(player1, 'ac', 8, 8);
@@ -159,6 +184,8 @@ export class GameScene extends Phaser.Scene {
     this.cameraController.update(delta);
     this.entityManager.updateRender(alpha);
     this.selectionSystem.updateRender();
+    this.projectileRenderer.update(delta);
+    this.fogRenderer.update();
     this.tileHighlight.update();
     this.sidebar.update();
     this.statusBar.update();
@@ -169,11 +196,14 @@ export class GameScene extends Phaser.Scene {
     const tick = this.fixedTimestep.getTick();
     gameEvents.emit(GameEvents.TICK, { tick });
 
-    // Update all systems
+    // Update all systems in deterministic order
     this.entityManager.updateTick(dt);
     this.resourceSystem.update(dt);
     this.buildSystem.update(dt);
     this.productionSystem.update(dt);
+    this.combatSystem.update(dt);
+    this.veterancySystem.update(dt);
+    this.fogSystem.update();
   }
 
   private spawnStartingBase(pid: PlayerId, factionId: 'ac' | 'ip', baseX: number, baseY: number): void {
