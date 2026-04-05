@@ -14,6 +14,7 @@ import { ProductionSystem } from '@/systems/ProductionSystem';
 import { CombatSystem } from '@/systems/CombatSystem';
 import { VeterancySystem } from '@/systems/VeterancySystem';
 import { FogSystem } from '@/systems/FogSystem';
+import { SuperweaponSystem } from '@/systems/SuperweaponSystem';
 import { NavGrid } from '@/pathfinding/NavGrid';
 import { ProjectileRenderer } from '@/rendering/ProjectileRenderer';
 import { FogRenderer } from '@/rendering/FogRenderer';
@@ -52,6 +53,7 @@ export class GameScene extends Phaser.Scene {
   private combatSystem!: CombatSystem;
   private veterancySystem!: VeterancySystem;
   private fogSystem!: FogSystem;
+  private superweaponSystem!: SuperweaponSystem;
   private projectileRenderer!: ProjectileRenderer;
   private fogRenderer!: FogRenderer;
   private perfOverlay!: PerformanceOverlay;
@@ -121,6 +123,9 @@ export class GameScene extends Phaser.Scene {
 
     // Veterancy system
     this.veterancySystem = new VeterancySystem(this.entityManager);
+
+    // Superweapons
+    this.superweaponSystem = new SuperweaponSystem(this, this.entityManager, this.playerStates);
 
     // Fog of war
     this.fogSystem = new FogSystem(player1, this.entityManager);
@@ -203,6 +208,7 @@ export class GameScene extends Phaser.Scene {
     this.productionSystem.update(dt);
     this.combatSystem.update(dt);
     this.veterancySystem.update(dt);
+    this.superweaponSystem.update(dt);
     this.fogSystem.update();
   }
 
