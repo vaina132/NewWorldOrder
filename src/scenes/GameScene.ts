@@ -206,6 +206,7 @@ export class GameScene extends Phaser.Scene {
     this.cameraController.update(delta);
     this.entityManager.updateRender(alpha);
     this.selectionSystem.updateRender();
+    this.tilemap.updateWater();
     this.projectileRenderer.update(delta);
     this.fogRenderer.update();
     this.tileHighlight.update();
@@ -303,47 +304,136 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Generate a coherent, natural-looking terrain map.
+   * Uses value noise for biome distribution + hand-placed features.
+   */
   private generateTerrain(width: number, height: number): number[][] {
     const terrain: number[][] = [];
     for (let y = 0; y < height; y++) {
-      terrain[y] = [];
+      terrain[y] = new Array(width).fill(0);
+    }
+
+    // Simple value noise for biome distribution
+    const noise = (x: number, y: number, scale: number): number => {
+      const sx = x / scale;
+      const sy = y / scale;
+      const n = Math.sin(sx * 127.1 + sy * 311.7) * 43758.5453;
+      return n - Math.floor(n);
+    };
+
+    // Multi-octave noise
+    const fbm = (x: number, y: number): number => {
+      return noise(x, y, 12) * 0.5 + noise(x, y, 6) * 0.3 + noise(x, y, 3) * 0.2;
+    };
+
+    // Step 1: Base terrain — grass everywhere, desert in dry zones
+    for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const noise = Math.random();
-        if (noise < 0.02) {
-          terrain[y]![x] = 2; // water
-        } else if (noise < 0.08) {
-          terrain[y]![x] = 1; // desert
-        } else if (noise < 0.11) {
-          terrain[y]![x] = 3; // road
-        } else {
-          terrain[y]![x] = 0; // grass
+        const n = fbm(x, y);
+        if (n > 0.65) {
+          terrain[y]![x] = 1; // desert patches
         }
       }
     }
 
-    // Place ore clusters near each base and in center
+    // Step 2: River running diagonally across the map
+    const riverCenterX = (y: number): number => {
+      return Math.round(width * 0.3 + Math.sin(y * 0.15) * 4 + y * 0.2);
+    };
+    for (let y = 0; y < height; y++) {
+      const cx = riverCenterX(y);
+      const riverWidth = 2 + Math.floor(Math.sin(y * 0.1) * 1.5);
+      for (let dx = -riverWidth; dx <= riverWidth; dx++) {
+        const tx = cx + dx;
+        if (tx >= 0 && tx < width) {
+          terrain[y]![tx] = 2; // water
+        }
+      }
+    }
+
+    // Step 3: Small lakes
+    const lakes = [
+      { cx: 8, cy: 30, rx: 3, ry: 2 },
+      { cx: 38, cy: 15, rx: 2, ry: 3 },
+    ];
+    for (const lake of lakes) {
+      for (let dy = -lake.ry - 1; dy <= lake.ry + 1; dy++) {
+        for (let dx = -lake.rx - 1; dx <= lake.rx + 1; dx++) {
+          const dist = (dx * dx) / (lake.rx * lake.rx) + (dy * dy) / (lake.ry * lake.ry);
+          if (dist <= 1) {
+            const tx = lake.cx + dx;
+            const ty = lake.cy + dy;
+            if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
+              terrain[ty]![tx] = 2;
+            }
+          }
+        }
+      }
+    }
+
+    // Step 4: Roads — connect bases with roads through center
+    const drawRoad = (x1: number, y1: number, x2: number, y2: number) => {
+      let cx = x1, cy = y1;
+      while (cx !== x2 || cy !== y2) {
+        if (cx >= 0 && cx < width && cy >= 0 && cy < height && terrain[cy]![cx] !== 2) {
+          terrain[cy]![cx] = 3;
+        }
+        // Step toward target, prefer horizontal then vertical
+        if (cx !== x2 && (cy === y2 || Math.random() > 0.4)) {
+          cx += cx < x2 ? 1 : -1;
+        } else if (cy !== y2) {
+          cy += cy < y2 ? 1 : -1;
+        }
+      }
+    };
+    drawRoad(10, 10, 24, 24); // Base 1 to center
+    drawRoad(37, 37, 24, 24); // Base 2 to center
+
+    // Step 5: Ore clusters at strategic locations
     const oreClusters = [
-      { cx: 14, cy: 14, radius: 4 },  // Near player 1 base
-      { cx: 30, cy: 30, radius: 4 },  // Near player 2 base
-      { cx: 24, cy: 24, radius: 5 },  // Center
-      { cx: 10, cy: 35, radius: 3 },  // Corner
-      { cx: 38, cy: 10, radius: 3 },  // Corner
+      { cx: 15, cy: 13, radius: 3 },  // Near player 1
+      { cx: 32, cy: 33, radius: 3 },  // Near player 2
+      { cx: 24, cy: 24, radius: 4 },  // Center (contested)
+      { cx: 6, cy: 38, radius: 3 },   // Far corner 1
+      { cx: 42, cy: 6, radius: 3 },   // Far corner 2
+      { cx: 20, cy: 38, radius: 2 },  // Expansion 1
+      { cx: 36, cy: 10, radius: 2 },  // Expansion 2
     ];
 
     for (const cluster of oreClusters) {
       for (let dy = -cluster.radius; dy <= cluster.radius; dy++) {
         for (let dx = -cluster.radius; dx <= cluster.radius; dx++) {
-          if (dx * dx + dy * dy > cluster.radius * cluster.radius) continue;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > cluster.radius) continue;
           const tx = cluster.cx + dx;
           const ty = cluster.cy + dy;
-          if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
-            if (Math.random() < 0.6) {
+          if (tx >= 0 && tx < width && ty >= 0 && ty < height && terrain[ty]![tx] !== 2) {
+            // Denser in center of cluster
+            if (dist < cluster.radius * 0.7 || noise(tx, ty, 4) > 0.4) {
               terrain[ty]![tx] = 4; // ore
             }
           }
         }
       }
     }
+
+    // Step 6: Clear base areas (no water/ore on starting positions)
+    const clearArea = (cx: number, cy: number, size: number) => {
+      for (let dy = -1; dy < size + 2; dy++) {
+        for (let dx = -1; dx < size + 6; dx++) {
+          const tx = cx + dx;
+          const ty = cy + dy;
+          if (tx >= 0 && tx < width && ty >= 0 && ty < height) {
+            if (terrain[ty]![tx] === 2 || terrain[ty]![tx] === 4) {
+              terrain[ty]![tx] = 0; // Clear to grass
+            }
+          }
+        }
+      }
+    };
+    clearArea(6, 6, 8);   // Player 1 base zone
+    clearArea(33, 33, 8);  // Player 2 base zone
 
     return terrain;
   }
