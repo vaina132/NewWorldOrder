@@ -53,7 +53,7 @@ export class MenuScene extends Phaser.Scene {
 
     // Actions
     skirmishBtn.on('pointerdown', () => {
-      this.scene.start('GameScene');
+      this.scene.start('SkirmishSetup');
     });
 
     // Version

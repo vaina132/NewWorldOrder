@@ -15,6 +15,9 @@ import { CombatSystem } from '@/systems/CombatSystem';
 import { VeterancySystem } from '@/systems/VeterancySystem';
 import { FogSystem } from '@/systems/FogSystem';
 import { SuperweaponSystem } from '@/systems/SuperweaponSystem';
+import { AISystem } from '@/systems/AISystem';
+import { AI_CONFIGS } from '@/config/AIConfig';
+import type { SkirmishConfig } from '@/scenes/SkirmishSetup';
 import { NavGrid } from '@/pathfinding/NavGrid';
 import { ProjectileRenderer } from '@/rendering/ProjectileRenderer';
 import { FogRenderer } from '@/rendering/FogRenderer';
@@ -54,6 +57,8 @@ export class GameScene extends Phaser.Scene {
   private veterancySystem!: VeterancySystem;
   private fogSystem!: FogSystem;
   private superweaponSystem!: SuperweaponSystem;
+  private aiSystem!: AISystem;
+  private gameOver = false;
   private projectileRenderer!: ProjectileRenderer;
   private fogRenderer!: FogRenderer;
   private perfOverlay!: PerformanceOverlay;
@@ -65,8 +70,13 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
-  create(): void {
+  create(data?: SkirmishConfig): void {
     this.fixedTimestep = new FixedTimestep();
+    this.gameOver = false;
+
+    const playerFaction = data?.playerFaction ?? 'ac';
+    const aiFaction = data?.aiFaction ?? 'ip';
+    const aiDifficulty = data?.aiDifficulty ?? 'medium';
 
     // Players
     const player1 = playerId(1);
@@ -74,8 +84,8 @@ export class GameScene extends Phaser.Scene {
 
     // Player states
     this.playerStates = new Map();
-    this.playerStates.set(player1, new PlayerState(player1, 'ac', 10000));
-    this.playerStates.set(player2, new PlayerState(player2, 'ip', 10000));
+    this.playerStates.set(player1, new PlayerState(player1, playerFaction, 10000));
+    this.playerStates.set(player2, new PlayerState(player2, aiFaction, 10000));
 
     // Generate terrain with ore fields
     const terrain = this.generateTerrain(MAP_WIDTH, MAP_HEIGHT);
@@ -132,11 +142,18 @@ export class GameScene extends Phaser.Scene {
     this.fogRenderer = new FogRenderer(this, this.fogSystem);
 
     // Spawn starting bases
-    this.spawnStartingBase(player1, 'ac', 8, 8);
-    this.spawnStartingBase(player2, 'ip', 35, 35);
+    this.spawnStartingBase(player1, playerFaction, 8, 8);
+    this.spawnStartingBase(player2, aiFaction, 35, 35);
 
     // Update power after spawning buildings
     this.powerSystem.update();
+
+    // AI System
+    const aiConfig = AI_CONFIGS[aiDifficulty];
+    this.aiSystem = new AISystem(
+      this.entityManager, this.buildSystem, this.productionSystem,
+      this.playerStates.get(player2)!, this.combatSystem, aiConfig, player1,
+    );
 
     // UI
     this.sidebar = new Sidebar(this, this.playerStates.get(player1)!, this.buildSystem, this.productionSystem, this.entityManager, this.tilemap);
@@ -209,7 +226,11 @@ export class GameScene extends Phaser.Scene {
     this.combatSystem.update(dt);
     this.veterancySystem.update(dt);
     this.superweaponSystem.update(dt);
+    this.aiSystem.update(dt);
     this.fogSystem.update();
+
+    // Win/Loss check
+    this.checkWinLoss();
   }
 
   private spawnStartingBase(pid: PlayerId, factionId: 'ac' | 'ip', baseX: number, baseY: number): void {
@@ -251,6 +272,34 @@ export class GameScene extends Phaser.Scene {
     const infConfig = faction.units[infantryType]!;
     for (let i = 0; i < 3; i++) {
       this.entityManager.spawnUnit(pid, factionId, baseX + 6 + i, baseY + 5, infConfig);
+    }
+  }
+
+  private checkWinLoss(): void {
+    if (this.gameOver) return;
+
+    const player1 = playerId(1);
+    const player2 = playerId(2);
+
+    // Count buildings per player
+    let p1Buildings = 0;
+    let p2Buildings = 0;
+    for (const building of this.entityManager['buildings'].values() as IterableIterator<import('@/entities/Building').Building>) {
+      if (!building.alive) continue;
+      if (building.ownerId === player1) p1Buildings++;
+      if (building.ownerId === player2) p2Buildings++;
+    }
+
+    if (p2Buildings === 0 && this.fixedTimestep.getTick() > 100) {
+      this.gameOver = true;
+      gameEvents.clear();
+      this.scene.start('GameOverScene', { victory: true, stats: { 'Time': Math.floor(this.fixedTimestep.getTick() / 20) } });
+    }
+
+    if (p1Buildings === 0 && this.fixedTimestep.getTick() > 100) {
+      this.gameOver = true;
+      gameEvents.clear();
+      this.scene.start('GameOverScene', { victory: false, stats: { 'Time': Math.floor(this.fixedTimestep.getTick() / 20) } });
     }
   }
 
